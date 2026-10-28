@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { stockOf, notSellableReason } = require('../lib/productStock');
 const path = require('path');
 const fs = require('fs');
 const { authRequired, requireRole } = require('../middlewares/auth');
@@ -91,6 +92,22 @@ router.post('/', upload.single('image'), async (req, res) => {
         if (!Bill_idBill || !Employee_idEmployee || !Products_idProducts || quantity == null || unit_price == null) {
             if (req.file) fs.unlinkSync(req.file.path);
             return res.status(400).json({ message: 'Missing required fields' });
+        }
+
+        /* ขายได้เฉพาะสินค้าพร้อมขาย (ชุดที่ยังตัดไม่เสร็จขายไม่ได้) และขายเกินที่เหลือไม่ได้ */
+        const stock = await stockOf(pool, Products_idProducts);
+        const blocked = notSellableReason(stock);
+        if (blocked) {
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(400).json({ message: blocked });
+        }
+        if (stock.stock_qty !== null && Number(quantity) > stock.stock_qty) {
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(400).json({
+                message: stock.stock_qty > 0
+                    ? `สินค้านี้เหลือ ${stock.stock_qty} ชิ้น ขาย ${quantity} ชิ้นไม่ได้`
+                    : 'สินค้านี้ขายหมดแล้ว',
+            });
         }
 
         const [result] = await pool.query(

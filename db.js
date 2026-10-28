@@ -4,14 +4,18 @@ require('dotenv').config();
 
 const pool = mysql.createPool({
     host : process.env.DB_HOST,
-    post : Number(process.env.DB_PORT || 3306),
+    port : Number(process.env.DB_PORT || 3306),
     user : process.env.DB_USER,
     password : process.env.DB_PASS,
     database : process.env.DB_NAME,
     waitForConnections : true,
     connectionLimit : 10,
     queueLimit : 0,
-    namedPlaceholders : true
+    namedPlaceholders : true,
+    /* TiDB Cloud บังคับต่อแบบ TLS → ตั้ง DB_SSL=true ตอน deploy (MySQL ในเครื่องไม่ต้องตั้ง) */
+    ssl : process.env.DB_SSL === 'true'
+        ? { minVersion : 'TLSv1.2', rejectUnauthorized : true }
+        : undefined
 })
 
 

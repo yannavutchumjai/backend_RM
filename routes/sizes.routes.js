@@ -30,15 +30,19 @@ const upload = multer({
 
 const publicPath = (filename) => filename ? `/uploads/${filename}` : null;
 
-router.get('/', async (_req, res) => {
+
+// ใน sizes.routes.js
+// แก้ไขไฟล์ sizes.routes.js
+router.get('/', async (req, res) => {
     try {
-        const [rows] = await pool.query(
-            'SELECT * FROM sizes'
-        );
+        // ลองดึงทุกอย่างออกมาดูก่อน เพื่อเช็กว่าตารางชื่อนี้และเข้าถึงได้จริง
+        const [rows] = await pool.query("SELECT * FROM sizes"); 
+        console.log("Sizes fetched:", rows); // ดูผลลัพธ์ที่ Terminal ของ Node.js
         res.json(rows);
     } catch (e) {
-        console.error(e);
-        res.status(500).json({ message: 'Server error' });
+        // ให้พิมพ์ Error ออกมาดูที่ Terminal ของ Node.js จะรู้สาเหตุที่แท้จริง
+        console.error("SQL Error in /sizes:", e.message); 
+        res.status(500).json({ message: 'Sizes API error', error: e.message });
     }
 });
 

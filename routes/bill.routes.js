@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { normalizePhone } = require('../lib/phone');
 const path = require('path');
 const fs = require('fs');
 const { authRequired, requireRole } = require('../middlewares/auth');
@@ -51,6 +52,8 @@ router.get('/:id', async (req, res) => {
                 idBill,
                 Bill_details,
                 User_link,
+                customer_name,
+                customer_phone,
                 Payment_idPayment,
                 totalAmount,
                 discount_amount,
@@ -77,6 +80,8 @@ router.post('/', upload.single('image'), async (req, res) => {
         const {
             Bill_details,
             User_link,
+            customer_name,
+            customer_phone,
             Payment_idPayment,
             totalAmount,
             discount_amount,
@@ -88,13 +93,23 @@ router.post('/', upload.single('image'), async (req, res) => {
             return res.status(400).json({ message: 'Missing required fields' });
         }
 
+        /* เบอร์ลูกค้าต้องครบ 10 หลัก (ไม่กรอกได้ แต่กรอกแล้วต้องถูก) */
+        const phone = normalizePhone(customer_phone, { label: 'เบอร์โทรลูกค้า' });
+        if (!phone.ok) {
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(400).json({ message: phone.message });
+        }
+
         const [result] = await pool.query(
             `INSERT INTO Bill
-            (Bill_details, User_link, Payment_idPayment, totalAmount, discount_amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?)`,
+            (Bill_details, User_link, customer_name, customer_phone,
+             Payment_idPayment, totalAmount, discount_amount, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
             [
                 Bill_details,
                 User_link,
+                customer_name || null,
+                phone.value,
                 Payment_idPayment,
                 totalAmount,
                 discount_amount || 0,
@@ -122,15 +137,25 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 
         const {
             Bill_details = null,
+            customer_name = null,
+            customer_phone = null,
             Payment_idPayment = null,
             totalAmount = null,
             discount_amount = null,
             notes = null
         } = req.body || {};
 
+        /* ส่งเบอร์มาแก้เมื่อไหร่ ต้องครบ 10 หลักเสมอ (ไม่ส่งมา = ไม่แก้) */
+        const phone = normalizePhone(customer_phone, { label: 'เบอร์โทรลูกค้า' });
+        if (customer_phone && !phone.ok) {
+            return res.status(400).json({ message: phone.message });
+        }
+
         const [result] = await conn.query(
             `UPDATE Bill
              SET Bill_details      = COALESCE(?, Bill_details),
+                 customer_name     = COALESCE(?, customer_name),
+                 customer_phone    = COALESCE(?, customer_phone),
                  Payment_idPayment = COALESCE(?, Payment_idPayment),
                  totalAmount       = COALESCE(?, totalAmount),
                  discount_amount   = COALESCE(?, discount_amount),
@@ -138,6 +163,8 @@ router.put('/:id', upload.single('image'), async (req, res) => {
              WHERE idBill = ? AND deleted_at IS NULL`,
             [
                 Bill_details,
+                customer_name,
+                customer_phone ? phone.value : null,
                 Payment_idPayment,
                 totalAmount,
                 discount_amount,

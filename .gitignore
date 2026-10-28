@@ -1,0 +1,6 @@
+node_modules/
+.env
+.DS_Store
+*.log
+# ไฟล์ dump ข้อมูลจริง ไม่ขึ้น repo
+backups/

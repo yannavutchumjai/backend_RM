@@ -28,7 +28,7 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = /image\/(png|jpeg|jpg|webp|gif)/.test(file.mimetype);
-    cb(ok ? null : new Error('Only image files are allowed'));
+    cb(ok ? null : new Error('Only image files are allowed'), ok);
   },
 });
 
@@ -42,7 +42,10 @@ const publicPath = (filename) =>
 router.get('/', async (_req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM fabric_types'
+      `SELECT type_id, type_name, image_path
+       FROM fabric_types
+       WHERE deleted_at IS NULL
+       ORDER BY type_id ASC`
     );
     res.json(rows);
   } catch (e) {
@@ -80,14 +83,14 @@ router.post('/', upload.single('image'), async (req, res) => {
     const imagePath = req.file ? publicPath(req.file.filename) : null;
 
     const [result] = await pool.query(
-      'INSERT INTO fabric_types (type_name) VALUES (?)',
-      [type_name]
+      'INSERT INTO fabric_types (type_name, image_path) VALUES (?, ?)',
+      [type_name, imagePath]
     );
 
     res.status(201).json({
       type_id: result.insertId,
       type_name,
-      image: imagePath,
+      image_path: imagePath,
     });
   } catch (e) {
     console.error(e);
@@ -111,19 +114,30 @@ router.put('/:id', upload.single('image'), async (req, res) => {
       return res.status(404).json({ message: 'Not found' });
     }
 
-    const { type_name = null } = req.body || {};
+    const { type_name = null, removeImage } = req.body || {};
+    const old = oldRows[0];
+
+    const newImagePath = req.file
+      ? publicPath(req.file.filename)
+      : (removeImage === "true" ? null : old.image_path);
 
     const [result] = await conn.query(
       `UPDATE fabric_types
-       SET type_name = COALESCE(?, type_name)
+       SET type_name = COALESCE(?, type_name),
+           image_path = ?
        WHERE type_id = ?`,
-      [type_name, id]
+      [type_name, newImagePath, id]
     );
+
+    if (newImagePath !== old.image_path && old.image_path) {
+      const oldFilePath = path.join(UPLOAD_DIR, path.basename(old.image_path));
+      if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+    }
 
     if (!result.affectedRows)
       return res.status(400).json({ message: 'No change' });
 
-    res.json({ message: 'Updated' });
+    res.json({ message: 'Updated', image_path: newImagePath });
   } catch (e) {
     console.error(e);
     if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
@@ -134,31 +148,22 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 });
 
 // DELETE /fabric_types/:id — ลบ
+// ✅ DELETE — เปลี่ยนเป็น soft delete
 router.delete('/:id', async (req, res) => {
-  const conn = await pool.getConnection();
   try {
-    const id = req.params.id;
-
-    const [rows] = await conn.query(
-      'SELECT * FROM fabric_types WHERE type_id = ?',
-      [id]
-    );
-    if (!rows.length)
-      return res.status(404).json({ message: 'Not found' });
-
-    const [result] = await conn.query(
-      'DELETE FROM fabric_types WHERE type_id = ?',
-      [id]
+    const [result] = await pool.query(
+      `UPDATE fabric_types 
+       SET deleted_at = CURRENT_TIMESTAMP 
+       WHERE type_id = ? AND deleted_at IS NULL`,
+      [req.params.id]
     );
     if (!result.affectedRows)
-      return res.status(400).json({ message: 'Delete failed' });
+      return res.status(404).json({ message: 'Not found' });
 
     res.json({ message: 'Deleted' });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    conn.release();
   }
 });
 
